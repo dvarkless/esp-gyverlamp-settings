@@ -11,6 +11,7 @@
 // определения появляются позже в объединённом скетче, прототипы не мешают)
 void controlHandler(bool state);
 void changePreset(int dir);
+void setPreset(byte pres);
 void sendToSlaves(byte data1, byte data2);
 void restartUDP();
 void fadeDown(uint32_t time);
@@ -41,6 +42,7 @@ enum WebAction : uint8_t {
   WEB_ACT_PHOTO_MIN,
   WEB_ACT_PHOTO_MAX,
   WEB_ACT_WIFI_RESTART,
+  WEB_ACT_SAVE_PRESETS,
 };
 static WebAction webAction = WEB_ACT_NONE;
 static uint32_t webActionMs = 0;
@@ -62,8 +64,18 @@ static char webSsid[32];
 static char webPass[32];
 static uint8_t webSleepMin = 30;         // таймер сна, минут
 
+// буфер обмена пресета (13 Б) и флаг валидности
+static Preset webPresetClip;
+static bool webPresetClipValid = false;
+
 // часовые пояса: индекс 0..26 соответствует cfg.GMT 1..27 (cfg.GMT = offset + 13)
 static const char WEB_GMT_OPTIONS[] = "-12;-11;-10;-9;-8;-7;-6;-5;-4;-3;-2;-1;0;+1;+2;+3;+4;+5;+6;+7;+8;+9;+10;+11;+12;+13;+14";
+
+// варианты для редактора пресета (1-based значения хранятся как есть)
+static const char WEB_EFFECT_OPTIONS[] = "Перлин;Цвет;Смена цвета;Градиент;Частицы;Огонь;Огонь 2020;Конфетти;Смерч;Часы";
+static const char WEB_ADV_OPTIONS[] = "Нет;Громкость;Низкие;Высокие;Часы";
+static const char WEB_REACT_OPTIONS[] = "Яркость;Масштаб;Длина";
+static const char WEB_PALETTE_OPTIONS[] = "Пользовательская;Тепло;Огонь;Дрова;Красный;Пастель;Натрий;Медь;Синий;Лава;Праздник;Радуга;Радуга-полосы;Облака;Океан;Лес;Закат;Тёмно-синий-красный;Оптимус;Тёплый;Холодный;Горячий;Розовый;Уютный;Киберпанк;Девушка;Рождество;Кислота;Синий дым;Мармелад;Лео;Аврора";
 
 static void webui_copyStr(char* dst, const char* src, size_t size) {
   if (!size) return;
@@ -112,6 +124,21 @@ static void webui_applyConfig() {
   if (cfg.adcMode == GL_ADC_BRI) switchToPhot();
   else if (cfg.adcMode == GL_ADC_MIC) switchToMic();
   else disableADC();
+}
+
+// -------------------- применение правок пресета --------------------
+// 1-based значения (effect/palette/advMode/soundReact) остаются как есть —
+// так их понимает UDP-протокол и effects.ino; только чистим диапазоны.
+static void webui_applyPreset() {
+  int idx = constrain((int)cfg.curPreset, 0, (int)cfg.presetAmount - 1);
+  Preset& p = preset[idx];
+  p.effect = constrain(p.effect, 1, 11);
+  p.advMode = constrain(p.advMode, GL_ADV_NONE, GL_ADV_CLOCK);
+  p.soundReact = constrain(p.soundReact, GL_REACT_BRI, GL_REACT_LEN);
+  p.palette = constrain(p.palette, 1, 32);
+  p.fadeBright = p.fadeBright ? 1 : 0;
+  p.fromCenter = p.fromCenter ? 1 : 0;
+  p.fromPal = p.fromPal ? 1 : 0;
 }
 
 // -------------------- страница «Статус» --------------------
@@ -301,6 +328,119 @@ static void webui_buildHardware(sets::Builder& b) {
   }
 }
 
+// -------------------- страница «Пресеты» --------------------
+static void webui_buildPresets(sets::Builder& b) {
+  {
+    sets::Menu m(b, "Пресеты");
+    uint8_t cur = (uint8_t)constrain((int)cfg.curPreset, 0, (int)cfg.presetAmount - 1);
+    {
+      sets::Group g(b, "Выбор пресета");
+      if (b.Spinner("Количество пресетов", 1, MAX_PRESETS, 1, &cfg.presetAmount)) {
+        cfgValidate();
+        b.reload();
+      }
+      String options;
+      for (uint8_t i = 1; i <= cfg.presetAmount; i++) {
+        if (i > 1) options += ';';
+        options += (int)i;
+      }
+      if (b.Select("Текущий пресет", options, &cur)) {
+        setPreset(cur);
+        if (cfg.role == GL_MASTER) sendToSlaves(1, cfg.curPreset);
+        b.reload();
+      }
+      {
+        sets::Buttons btns(b);
+        if (b.Button("Назад")) {
+          changePreset(-1);
+          if (cfg.role == GL_MASTER) sendToSlaves(1, cfg.curPreset);
+          b.reload();
+        }
+        if (b.Button("Вперёд")) {
+          changePreset(1);
+          if (cfg.role == GL_MASTER) sendToSlaves(1, cfg.curPreset);
+          b.reload();
+        }
+        if (b.Button("Показать")) {
+          setPreset(cfg.curPreset);
+          if (cfg.role == GL_MASTER) sendToSlaves(1, cfg.curPreset);
+        }
+      }
+      b.Paragraph("", "Правки применяются сразу к текущему пресету.");
+    }
+    {
+      sets::Group g(b, "Редактор пресета");
+      Preset& p = preset[cur];
+      uint8_t eff = (p.effect >= 1 && p.effect <= 10) ? (p.effect - 1) : 0;
+      if (b.Select("Эффект", WEB_EFFECT_OPTIONS, &eff)) {
+        p.effect = eff + 1;
+        webui_applyPreset();
+      }
+      bool own = p.fadeBright;
+      if (b.Switch("Своя яркость", &own)) {
+        p.fadeBright = own;
+        webui_applyPreset();
+      }
+      if (b.Slider("Яркость пресета", 0, 255, 1, "", &p.bright)) webui_applyPreset();
+      uint8_t adv = (p.advMode >= GL_ADV_NONE && p.advMode <= GL_ADV_CLOCK) ? (p.advMode - 1) : 0;
+      if (b.Select("Доп. режим", WEB_ADV_OPTIONS, &adv)) {
+        p.advMode = adv + 1;
+        webui_applyPreset();
+      }
+      uint8_t react = (p.soundReact >= GL_REACT_BRI && p.soundReact <= GL_REACT_LEN) ? (p.soundReact - 1) : 0;
+      if (b.Select("Реакция на звук", WEB_REACT_OPTIONS, &react)) {
+        p.soundReact = react + 1;
+        webui_applyPreset();
+      }
+      if (b.Slider("Мин. сигнал", 0, 255, 1, "", &p.min)) webui_applyPreset();
+      if (b.Slider("Макс. сигнал", 0, 255, 1, "", &p.max)) webui_applyPreset();
+      if (b.Slider("Скорость", 0, 255, 1, "", &p.speed)) webui_applyPreset();
+      uint8_t pal = (p.palette >= 1 && p.palette <= 32) ? (p.palette - 1) : 1;
+      if (b.Select("Палитра", WEB_PALETTE_OPTIONS, &pal)) {
+        p.palette = pal + 1;
+        webui_applyPreset();
+      }
+      if (b.Slider("Масштаб", 0, 255, 1, "", &p.scale)) webui_applyPreset();
+      bool center = p.fromCenter;
+      if (b.Switch("Из центра", &center)) {
+        p.fromCenter = center;
+        webui_applyPreset();
+      }
+      if (b.Slider("Цвет (оттенок)", 0, 255, 1, "", &p.color)) webui_applyPreset();
+      bool fromPal = p.fromPal;
+      if (b.Switch("Из палитры", &fromPal)) {
+        p.fromPal = fromPal;
+        webui_applyPreset();
+      }
+      b.Paragraph("", "При равных мин/макс сигнала светомузыка не работает.");
+    }
+    {
+      sets::Group g(b, "Утилиты");
+      {
+        sets::Buttons btns(b);
+        if (b.Button("Копировать")) {
+          webPresetClip = preset[cur];
+          webPresetClipValid = true;
+        }
+        if (b.Button("Вставить")) {
+          if (webPresetClipValid) {
+            preset[cur] = webPresetClip;
+            webui_applyPreset();
+            b.reload();
+          }
+        }
+        if (b.Button("Сбросить")) {
+          preset[cur] = Preset();
+          webui_applyPreset();
+          b.reload();
+        }
+      }
+      if (b.Button("Сохранить пресеты")) webui_startAction(WEB_ACT_SAVE_PRESETS);
+      b.Paragraph("", "Копия хранится до перезагрузки лампы.");
+    }
+  }
+}
+
 // -------------------- страница «Система» --------------------
 static void webui_buildSystem(sets::Builder& b) {
   {
@@ -332,6 +472,7 @@ static void webui_buildSystem(sets::Builder& b) {
 static void webui_build(sets::Builder& b) {
   webui_buildStatus(b);
   webui_buildLight(b);
+  webui_buildPresets(b);
   webui_buildNetwork(b);
   webui_buildHardware(b);
   webui_buildSystem(b);
@@ -397,6 +538,10 @@ static void webui_runDeferred() {
     case WEB_ACT_WIFI_RESTART:
       storage_saveCfg();
       ESP.restart();
+      break;
+    case WEB_ACT_SAVE_PRESETS:
+      storage_savePreset();
+      webSavedNotice = true;
       break;
     default:
       break;
