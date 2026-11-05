@@ -1,12 +1,14 @@
 void presetRotation(bool force) {
   if (holdPresTmr.runningStop()) return;
   if (cfg.rotation && (now.newMin() || force)) {   // если автосмена и новая минута
+    byte rotPer = (cfg.rotPeriod == 0) ? 1 : cfg.rotPeriod;                // защита от деления на 0
+    byte presAmount = constrain(cfg.presetAmount, 1, MAX_PRESETS);         // защита от деления на 0
     if (cfg.rotRnd) {                   // случайная
-      cfg.curPreset = trnd.fromMin(cfg.rotPeriod, cfg.presetAmount);
+      cfg.curPreset = trnd.fromMin(rotPer, presAmount);
       DEBUG("Rnd changed to ");
       DEBUGLN(cfg.curPreset);
     } else {                            // по порядку
-      cfg.curPreset = ((trnd.getMin() / cfg.rotPeriod) % cfg.presetAmount);
+      cfg.curPreset = ((trnd.getMin() / rotPer) % presAmount);
       DEBUG("In order changed to ");
       DEBUGLN(cfg.curPreset);
     }
@@ -26,7 +28,8 @@ void changePreset(int dir) {
 
 void setPreset(byte pres) {
   //if (!cfg.rotation) {    // ручная смена
-  cfg.curPreset = constrain(pres, 0, cfg.presetAmount - 1);
+  byte amount = constrain(cfg.presetAmount, 1, MAX_PRESETS);   // защита от некорректного количества
+  cfg.curPreset = constrain(pres, 0, amount - 1);
   holdPresTmr.restart();
   DEBUG("Preset set to ");
   DEBUGLN(cfg.curPreset);

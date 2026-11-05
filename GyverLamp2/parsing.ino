@@ -106,6 +106,7 @@ void parsing() {
         FOR_i(0, CFG_SIZE) {
           *((byte*)&cfg + i) = data[i + 2];   // загоняем в структуру
         }
+        cfgValidate();   // проверка конфига после пакета
         setTime(data[CFG_SIZE + 10 + 2], data[CFG_SIZE + 10 + 3], data[CFG_SIZE + 10 + 4], data[CFG_SIZE + 10 + 5]);
         if (cfg.deviceType == GL_TYPE_STRIP) {
           if (cfg.length > MAX_LEDS) cfg.length = MAX_LEDS;
@@ -132,6 +133,7 @@ void parsing() {
           int dataStart = cfg.presetAmount * PRES_SIZE + 3;
           setPreset(data[dataStart] - 1);
           setTime(data[dataStart + 1], data[dataStart + 2], data[dataStart + 3], data[dataStart + 4]);
+          cfgValidate();   // проверка конфига после пакета режимов
 
           EE_updatePreset();
           //presetRotation(true); // форсировать смену режима

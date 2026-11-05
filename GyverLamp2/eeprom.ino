@@ -3,6 +3,13 @@ bool EEdawnFlag = false;
 bool EEpresetFlag = false;
 bool EEpalFlag = false;
 
+// проверка конфига на допустимые значения (после eeprom и пакетов)
+void cfgValidate() {
+  if (cfg.rotPeriod == 0) cfg.rotPeriod = 1;                    // защита от деления на 0
+  cfg.presetAmount = constrain(cfg.presetAmount, 1, MAX_PRESETS);
+  cfg.curPreset = constrain(cfg.curPreset, 0, cfg.presetAmount - 1);
+}
+
 void EE_startup() {
   // старт епром
   EEPROM.begin(1000);   // старт епром
@@ -21,6 +28,7 @@ void EE_startup() {
   EEPROM.get(sizeof(cfg) + 1, dawn);
   EEPROM.get(sizeof(cfg) + sizeof(dawn) + 1, pal);
   EEPROM.get(sizeof(cfg) + sizeof(dawn) + sizeof(pal) + 1, preset);
+  cfgValidate();   // проверка конфига после загрузки
 
   DEBUG("EEPR size: ");
   DEBUGLN(sizeof(cfg) + sizeof(dawn) + sizeof(pal) + sizeof(preset) + 1);
