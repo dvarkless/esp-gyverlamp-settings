@@ -43,6 +43,7 @@ enum WebAction : uint8_t {
   WEB_ACT_PHOTO_MAX,
   WEB_ACT_WIFI_RESTART,
   WEB_ACT_SAVE_PRESETS,
+  WEB_ACT_SAVE_DAWN,
 };
 static WebAction webAction = WEB_ACT_NONE;
 static uint32_t webActionMs = 0;
@@ -63,6 +64,7 @@ static uint8_t webWiFiPendingMode = 0;   // выбранный, но не при
 static char webSsid[32];
 static char webPass[32];
 static uint8_t webSleepMin = 30;         // таймер сна, минут
+static uint8_t webDawnDay = 0;           // вкладка рассвета: 0=Пн … 6=Вс
 
 // буфер обмена пресета (13 Б) и флаг валидности
 static Preset webPresetClip;
@@ -139,6 +141,23 @@ static void webui_applyPreset() {
   p.fadeBright = p.fadeBright ? 1 : 0;
   p.fromCenter = p.fromCenter ? 1 : 0;
   p.fromPal = p.fromPal ? 1 : 0;
+}
+
+// -------------------- проверка настроек рассвета --------------------
+// UI: 0=Пн … 6=Вс, прошивка: 0=Вс … 6=Сб → fw day = (ui + 1) % 7
+static uint8_t webui_dawnDayIndex() {
+  uint8_t i = (webDawnDay <= 6) ? webDawnDay : 0;
+  return (uint8_t)((i + 1) % 7);
+}
+
+static void webui_applyDawn() {
+  uint8_t d = webui_dawnDayIndex();
+  dawn.state[d] = dawn.state[d] ? 1 : 0;
+  dawn.hour[d] = constrain(dawn.hour[d], 0, 23);
+  dawn.minute[d] = constrain(dawn.minute[d], 0, 55);
+  dawn.bright = constrain(dawn.bright, 0, 255);
+  dawn.time = constrain(dawn.time, 5, 60);
+  dawn.post = constrain(dawn.post, 5, 60);
 }
 
 // -------------------- страница «Статус» --------------------
@@ -441,6 +460,73 @@ static void webui_buildPresets(sets::Builder& b) {
   }
 }
 
+// -------------------- страница «Рассвет» --------------------
+static void webui_buildDawn(sets::Builder& b) {
+  {
+    sets::Menu m(b, "Рассвет");
+    if (webDawnDay > 6) webDawnDay = 0;
+    uint8_t d = webui_dawnDayIndex();
+    {
+      sets::Group g(b, "День недели");
+      if (b.Tabs("Пн;Вт;Ср;Чт;Пт;Сб;Вс", &webDawnDay)) {
+        if (webDawnDay > 6) webDawnDay = 0;
+        b.reload();
+      }
+      b.Paragraph("", "Расписание хранится отдельно для каждого дня недели.");
+    }
+    {
+      sets::Group g(b, "Расписание дня");
+      bool on = dawn.state[d] ? 1 : 0;
+      if (b.Switch("Рассвет включён", &on)) {
+        dawn.state[d] = on;
+        webui_applyDawn();
+      }
+      uint8_t hour = (dawn.hour[d] <= 23) ? dawn.hour[d] : 0;
+      if (b.Spinner("Час", 0, 23, 1, &hour)) {
+        dawn.hour[d] = hour;
+        webui_applyDawn();
+      }
+      uint8_t minute = (dawn.minute[d] > 55) ? 55 : dawn.minute[d];
+      minute = (uint8_t)((minute / 5) * 5);
+      if (b.Spinner("Минута", 0, 55, 5, &minute)) {
+        dawn.minute[d] = minute;
+        webui_applyDawn();
+      }
+      b.Paragraph("", "Время — момент включения; рассвет стартует за «длительность» до него.");
+    }
+    {
+      sets::Group g(b, "Параметры (общие для всех дней)");
+      if (b.Slider("Яркость", 0, 255, 1, "", &dawn.bright)) webui_applyDawn();
+      uint8_t dur = (dawn.time < 5) ? 5 : ((dawn.time > 60) ? 60 : (uint8_t)((dawn.time / 5) * 5));
+      if (b.Spinner("Длительность (мин)", 5, 60, 5, &dur)) {
+        dawn.time = dur;
+        webui_applyDawn();
+      }
+      uint8_t post = (dawn.post < 5) ? 5 : ((dawn.post > 60) ? 60 : (uint8_t)((dawn.post / 5) * 5));
+      if (b.Spinner("После рассвета (мин)", 5, 60, 5, &post)) {
+        dawn.post = post;
+        webui_applyDawn();
+      }
+    }
+    {
+      sets::Group g(b, "Действия");
+      {
+        sets::Buttons btns(b);
+        if (b.Button("Включить все")) {
+          for (uint8_t i = 0; i < 7; i++) dawn.state[i] = 1;
+          b.reload();
+        }
+        if (b.Button("Выключить все")) {
+          for (uint8_t i = 0; i < 7; i++) dawn.state[i] = 0;
+          b.reload();
+        }
+      }
+      if (b.Button("Сохранить рассвет")) webui_startAction(WEB_ACT_SAVE_DAWN);
+      b.Paragraph("", "Настройки сохраняются автоматически через 30 секунд.");
+    }
+  }
+}
+
 // -------------------- страница «Система» --------------------
 static void webui_buildSystem(sets::Builder& b) {
   {
@@ -473,6 +559,7 @@ static void webui_build(sets::Builder& b) {
   webui_buildStatus(b);
   webui_buildLight(b);
   webui_buildPresets(b);
+  webui_buildDawn(b);
   webui_buildNetwork(b);
   webui_buildHardware(b);
   webui_buildSystem(b);
@@ -541,6 +628,10 @@ static void webui_runDeferred() {
       break;
     case WEB_ACT_SAVE_PRESETS:
       storage_savePreset();
+      webSavedNotice = true;
+      break;
+    case WEB_ACT_SAVE_DAWN:
+      storage_saveDawn();
       webSavedNotice = true;
       break;
     default:
