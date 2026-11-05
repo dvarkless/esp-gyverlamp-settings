@@ -32,7 +32,7 @@ void parsing() {
     char *str, *p = buf;
     char *ssid, *pass;
 
-    while ((str = strtok_r(p, ",", &p)) != NULL) {
+    while (count < (int)sizeof(data) && (str = strtok_r(p, ",", &p)) != NULL) {
       uint32_t thisInt = atoi(str);
       data[count++] = (byte)thisInt;  // парс байтов
       // парс "тяжёлых" данных
