@@ -183,6 +183,7 @@ void effectsRoutine() {
         if (CUR_PRES.color < 5) gPal = HeatColors_p;
         else gPal = CRGBPalette16(CRGB::Black, CHSV(CUR_PRES.color, 255, 255), CRGB::White);
         if (CUR_PRES.fromCenter) thisLength /= 2;
+        if (thisLength < 1) thisLength = 1;   // звуковая длина может быть 0 - защита от деления на ноль
 
         for (int i = 0; i < thisLength; i++) heat[i] = qsub8(heat[i], random8(0, ((((255 - thisScale) / 2 + 20) * 10) / thisLength) + 2));
         for (int k = thisLength - 1; k >= 2; k--) heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2] ) / 3;
@@ -206,6 +207,7 @@ void effectsRoutine() {
       } else {                          // 1D огонь
         static byte heat[MAX_LEDS];
         if (CUR_PRES.fromCenter) thisLength /= 2;
+        if (thisLength < 1) thisLength = 1;   // звуковая длина может быть 0 - защита от деления на ноль
 
         for (int i = 0; i < thisLength; i++) heat[i] = qsub8(heat[i], random8(0, ((((255 - thisScale) / 2 + 20) * 10) / thisLength) + 2));
         for (int k = thisLength - 1; k >= 2; k--) heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2] ) / 3;
