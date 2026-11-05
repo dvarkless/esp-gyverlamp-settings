@@ -122,14 +122,14 @@ void parsing() {
 
       case 2: DEBUGLN("Preset");
         {
-          cfg.presetAmount = data[2];   // кол-во режимов
+          cfg.presetAmount = constrain(data[2], 1, MAX_PRESETS);   // кол-во режимов
           FOR_j(0, cfg.presetAmount) {
             FOR_i(0, PRES_SIZE) {
               *((byte*)&preset + j * PRES_SIZE + i) = data[j * PRES_SIZE + i + 3]; // загоняем в структуру
             }
           }
           //if (!cfg.rotation) setPreset(data[cfg.presetAmount * PRES_SIZE + 3] - 1);
-          byte dataStart = cfg.presetAmount * PRES_SIZE + 3;
+          int dataStart = cfg.presetAmount * PRES_SIZE + 3;
           setPreset(data[dataStart] - 1);
           setTime(data[dataStart + 1], data[dataStart + 2], data[dataStart + 3], data[dataStart + 4]);
 
