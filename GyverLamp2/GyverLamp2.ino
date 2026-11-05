@@ -134,6 +134,9 @@ bool loading = true;
 int udpLength = 0;
 byte udpScale = 0, udpBright = 0;
 
+// ---------- ВЕБ-ИНТЕРФЕЙС -----------
+#include "webui.h"       // Settings 1.4.3 (SettingsESP); после глобалов, см. комментарий в файле
+
 // ------------------- SETUP --------------------
 void setup() {
   misc();
@@ -152,6 +155,7 @@ void setup() {
   checkButton();        // проверяем кнопку на удержание
   startWiFi();          // старт вайфай
   setupTime();          // выставляем время
+  webui_begin();        // веб-интерфейс настроек (после старта WiFi)
 #endif
   setupADC();           // настраиваем анализ
   presetRotation(true); // форсировать смену режима
@@ -164,6 +168,8 @@ void loop() {
   tryReconnect();     // пробуем переподключиться если WiFi упал
   yield();
   parsing();          // ловим данные
+  yield();
+  webui_tick();       // веб-интерфейс настроек (тикер Settings + отложенные действия)
   yield();
 #endif
   storage_tick();     // автосохранение настроек
