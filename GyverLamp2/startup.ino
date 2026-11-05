@@ -22,8 +22,7 @@ void checkButton() {
     if (state) {
       DEBUGLN("change mode");
       cfg.WiFimode = !cfg.WiFimode;
-      EEPROM.put(0, cfg);
-      EEPROM.commit();
+      storage_saveCfg();        // сохраняем настройки (Saver, не EEPROM)
       delay(100);
       ESP.restart();
     }
@@ -57,8 +56,7 @@ void checkGroup() {
     yield();
   }
   if (flag) {
-    EEPROM.put(0, cfg);
-    EEPROM.commit();
+    storage_saveCfg();        // сохраняем настройки (Saver, не EEPROM)
   }
   DEBUG("group: ");
   DEBUGLN(cfg.group);
@@ -97,7 +95,6 @@ void setupAP() {
   WiFi.mode(WIFI_AP);
   delay(100);
   WiFi.softAP(AP_NameChar, WiFiPassword);
-  server.begin();
   DEBUGLN("Setting AP Mode");
   DEBUG("AP IP: ");
   DEBUGLN(WiFi.softAPIP());
@@ -135,7 +132,6 @@ void setupLocal() {
       if (connect) {
         connTmr.stop();
         blink16(CRGB::Green);
-        server.begin();
         DEBUG("Connected! Local IP: ");
         DEBUGLN(WiFi.localIP());
         delay(500);

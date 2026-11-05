@@ -57,7 +57,6 @@ const char WiFiPassword[] = "banana6969";
 
 // ------------ Прочее -------------
 #define GL_VERSION 23       // код версии прошивки
-#define EE_TOUT 30000       // таймаут сохранения епром после изменения, мс
 #define DEBUG_SERIAL_LAMP   // закомментируй чтобы выключить отладку (скорость 115200)
 #define EE_KEY 56           // ключ сброса eeprom
 #define NTP_UPD_PRD 5       // период обновления времени с NTP сервера, минут
@@ -102,7 +101,7 @@ const char WiFiPassword[] = "banana6969";
 #include <FastLED.h>      // лента
 #include <ESP8266WiFi.h>  // базовая либа есп
 #include <WiFiUdp.h>      // общение по UDP
-#include <EEPROM.h>       // епром
+#include "storage.h"      // настройки (Saver + LittleFS)
 #include "ESP8266httpUpdate.h"  // OTA
 #include "mString.h"      // стринг билдер
 #include "Clap.h"         // обработка хлопков
@@ -112,7 +111,6 @@ Config cfg;
 Preset preset[MAX_PRESETS];
 Dawn dawn;
 Palette pal;
-WiFiServer server(80);
 WiFiUDP Udp;
 WiFiUDP ntpUDP;
 IPAddress broadIP;
@@ -120,7 +118,7 @@ NTPClient ntp(ntpUDP);
 CRGB leds[MAX_LEDS];
 Time now;
 Button btn(BTN_PIN);
-timerMillis EEtmr(EE_TOUT), turnoffTmr, connTmr(120000ul), dawnTmr, holdPresTmr(30000ul), blinkTmr(300);
+timerMillis turnoffTmr, connTmr(120000ul), dawnTmr, holdPresTmr(30000ul), blinkTmr(300);
 timerMillis effTmr(30, true), onlineTmr(500, true), postDawn(10 * 60000ul);
 TimeRandom trnd;
 VolAnalyzer vol(A0), low, high;
@@ -146,7 +144,7 @@ void setup() {
 #endif
   startStrip();         // старт ленты
   btn.setLevel(digitalRead(BTN_PIN));   // смотрим что за кнопка
-  EE_startup();         // читаем епром
+  storage_begin();      // старт настроек (Saver + LittleFS)
 #ifndef SKIP_WIFI
   checkUpdate();        // индикация было ли обновление
   showRGB();            // показываем ргб
@@ -168,7 +166,7 @@ void loop() {
   parsing();          // ловим данные
   yield();
 #endif
-  checkEEupdate();    // сохраняем епром
+  storage_tick();     // автосохранение настроек
   presetRotation(0);  // смена режимов по расписанию
   effectsRoutine();   // мигаем
   yield();
