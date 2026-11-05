@@ -19,6 +19,7 @@ void cfgValidate();
 void switchToPhot();
 void switchToMic();
 void disableADC();
+void updPal();
 
 // ===================== Веб-интерфейс настроек =====================
 // Типы Settings и билдеры живут только в этом заголовке: авто-прототипы
@@ -44,6 +45,7 @@ enum WebAction : uint8_t {
   WEB_ACT_WIFI_RESTART,
   WEB_ACT_SAVE_PRESETS,
   WEB_ACT_SAVE_DAWN,
+  WEB_ACT_SAVE_PAL,
 };
 static WebAction webAction = WEB_ACT_NONE;
 static uint32_t webActionMs = 0;
@@ -65,6 +67,7 @@ static char webSsid[32];
 static char webPass[32];
 static uint8_t webSleepMin = 30;         // таймер сна, минут
 static uint8_t webDawnDay = 0;           // вкладка рассвета: 0=Пн … 6=Вс
+static uint32_t webPalRGB[16];            // теневые цвета палитры, 0xRRGGBB (64 Б)
 
 // буфер обмена пресета (13 Б) и флаг валидности
 static Preset webPresetClip;
@@ -158,6 +161,29 @@ static void webui_applyDawn() {
   dawn.bright = constrain(dawn.bright, 0, 255);
   dawn.time = constrain(dawn.time, 5, 60);
   dawn.post = constrain(dawn.post, 5, 60);
+}
+
+// -------------------- палитра --------------------
+// pal.strip хранит 16 троек R,G,B (проверено по updPal: CRGB(strip[3i], strip[3i+1], strip[3i+2])).
+// Color в Settings работает с 0xRRGGBB, поэтому теневой uint32_t совпадает по порядку байт.
+static void webui_paletteToShadow() {
+  for (uint8_t i = 0; i < 16; i++) {
+    uint8_t r = pal.strip[i * 3];
+    uint8_t g = pal.strip[i * 3 + 1];
+    uint8_t b = pal.strip[i * 3 + 2];
+    webPalRGB[i] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+  }
+}
+
+static void webui_applyPalette() {
+  pal.size = constrain(pal.size, 1, 16);
+  for (uint8_t i = 0; i < 16; i++) {
+    uint32_t c = webPalRGB[i];
+    pal.strip[i * 3] = (uint8_t)((c >> 16) & 0xFF);      // R
+    pal.strip[i * 3 + 1] = (uint8_t)((c >> 8) & 0xFF);   // G
+    pal.strip[i * 3 + 2] = (uint8_t)(c & 0xFF);          // B
+  }
+  updPal();   // перестроить paletteArr[0] (кастомная палитра №1)
 }
 
 // -------------------- страница «Статус» --------------------
@@ -527,6 +553,48 @@ static void webui_buildDawn(sets::Builder& b) {
   }
 }
 
+// -------------------- страница «Палитра» --------------------
+static void webui_buildPalette(sets::Builder& b) {
+  webui_paletteToShadow();   // стрип → теневые uint32_t для Color
+  {
+    sets::Menu m(b, "Палитра");
+    {
+      sets::Group g(b, "Пользовательская палитра");
+      uint8_t size = constrain(pal.size, 1, 16);
+      if (b.Spinner("Размер", 1, 16, 1, &size)) {
+        pal.size = size;
+        webui_applyPalette();
+      }
+      b.Paragraph("", "16 цветов (0xRRGGBB). Палитра №1 в списке пресетов — «Пользовательская».");
+    }
+    {
+      sets::Group g(b, "Цвета");
+      for (uint8_t i = 0; i < 16; i++) {
+        String label = "Цвет ";
+        label += (int)(i + 1);
+        if (b.Color(label, &webPalRGB[i])) webui_applyPalette();
+      }
+    }
+    {
+      sets::Group g(b, "Действия");
+      {
+        sets::Buttons btns(b);
+        if (b.Button("Сбросить")) {
+          for (uint8_t i = 0; i < 16; i++) {
+            uint8_t v = (uint8_t)(i * 17);   // чёрный → белый
+            webPalRGB[i] = ((uint32_t)v << 16) | ((uint32_t)v << 8) | v;
+          }
+          pal.size = 16;
+          webui_applyPalette();
+          b.reload();
+        }
+      }
+      if (b.Button("Сохранить палитру")) webui_startAction(WEB_ACT_SAVE_PAL);
+      b.Paragraph("", "Сброс — градиент чёрный→белый. Настройки сохраняются через 30 секунд.");
+    }
+  }
+}
+
 // -------------------- страница «Система» --------------------
 static void webui_buildSystem(sets::Builder& b) {
   {
@@ -560,6 +628,7 @@ static void webui_build(sets::Builder& b) {
   webui_buildLight(b);
   webui_buildPresets(b);
   webui_buildDawn(b);
+  webui_buildPalette(b);
   webui_buildNetwork(b);
   webui_buildHardware(b);
   webui_buildSystem(b);
@@ -632,6 +701,10 @@ static void webui_runDeferred() {
       break;
     case WEB_ACT_SAVE_DAWN:
       storage_saveDawn();
+      webSavedNotice = true;
+      break;
+    case WEB_ACT_SAVE_PAL:
+      storage_savePal();
       webSavedNotice = true;
       break;
     default:
