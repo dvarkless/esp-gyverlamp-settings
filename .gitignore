@@ -53,3 +53,32 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# --- Arduino / ESP8266 ---
+build/
+*.bin
+.pio/
+.pioenvs/
+.piolibdeps/
+.arduino15/
+arduino_build_*/
+*.ino.bin
+*.ino.elf
+*.ino.map
+
+# --- IDE / editor / OS ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- local-only config and secrets (never commit) ---
+local_secrets.h
+secrets.h
+secrets/
+wifi_config.h
+local_config.h
+
