@@ -25,36 +25,18 @@ void parsing() {
 
     DEBUGLN(buf);   // пакет вида <GL>,<тип>,<дата1>,<дата2>...
 
-    // ПАРСИНГ
+    // ПАРСИНГ (настройки приходят только из web UI, по UDP - управление и синхронизация)
     byte data[MAX_PRESETS * PRES_SIZE + 10];
     memset(data, 0, MAX_PRESETS * PRES_SIZE + 10);
     int count = 0;
     char *str, *p = buf;
-    char *ssid, *pass;
 
     while (count < (int)sizeof(data) && (str = strtok_r(p, ",", &p)) != NULL) {
       uint32_t thisInt = atoi(str);
       data[count++] = (byte)thisInt;  // парс байтов
-      // парс "тяжёлых" данных
-      if (data[1] == 0) {
-        if (count == 4) ssid = str;
-        if (count == 5) pass = str;
-      }
-      if (data[1] == 1) {
-        if (count == 15) cfg.length = thisInt;
-        if (count == 16) cfg.width = thisInt;
-        if (count == 17) cfg.GMT = byte(thisInt);
-        if (count == 18) cfg.cityID = thisInt;
-        if (count == 19) cfg.mqtt = byte(thisInt);
-        if (count == 20) strcpy(cfg.mqttID, str);
-        if (count == 21) strcpy(cfg.mqttHost, str);
-        if (count == 22) cfg.mqttPort = thisInt;
-        if (count == 23) strcpy(cfg.mqttLogin, str);
-        if (count == 24) strcpy(cfg.mqttPass, str);
-      }
     }
 
-    // тип 0 - control, 1 - config, 2 - effects, 3 - dawn, 4 - from master, 5 - palette, 6 - time
+    // тип 0 - control, 4 - from master, 6 - time (конфигурация теперь только в web UI)
     switch (data[1]) {
       case 0: DEBUGLN("Control"); blinkTmr.restart();
         if (!cfg.state && data[2] != 1) return;   // если лампа выключена и это не команда на включение - не обрабатываем
@@ -66,13 +48,6 @@ void parsing() {
           case 4: changePreset(-1); break;                // пред пресет
           case 5: changePreset(1); break;                 // след пресет
           case 6: setPreset(data[3] - 1); break;          // конкретный пресет data[3]
-          case 7: cfg.WiFimode = data[3]; EE_updCfgRst(); break;  // смена режима WiFi
-          case 8: cfg.role = data[3]; break;              // смена роли
-          case 9: cfg.group = data[3]; restartUDP(); break;   // смена группы
-          case 10:                                        // установка настроек WiFi
-            strcpy(cfg.ssid, ssid);
-            strcpy(cfg.pass, pass);
-            break;
           case 11: EE_updCfgRst(); break;                 // рестарт
           case 12: if (gotNTP) {                          // OTA обновление, если есть интернет
               cfg.update = 1;
@@ -102,54 +77,6 @@ void parsing() {
         EE_updCfg();
         break;
 
-      case 1: DEBUGLN("Config"); blinkTmr.restart();
-        FOR_i(0, CFG_SIZE) {
-          *((byte*)&cfg + i) = data[i + 2];   // загоняем в структуру
-        }
-        cfgValidate();   // проверка конфига после пакета
-        setTime(data[CFG_SIZE + 10 + 2], data[CFG_SIZE + 10 + 3], data[CFG_SIZE + 10 + 4], data[CFG_SIZE + 10 + 5]);
-        if (cfg.deviceType == GL_TYPE_STRIP) {
-          if (cfg.length > MAX_LEDS) cfg.length = MAX_LEDS;
-          cfg.width = 1;
-        }
-        if (cfg.length * cfg.width > MAX_LEDS) cfg.width = MAX_LEDS / cfg.length;
-        ntp.setTimeOffset((cfg.GMT - 13) * 3600);
-        FastLED.setMaxPowerInVoltsAndMilliamps(STRIP_VOLT, cfg.maxCur * 100);
-        if (cfg.adcMode == GL_ADC_BRI) switchToPhot();
-        else if (cfg.adcMode == GL_ADC_MIC) switchToMic();
-        else disableADC();
-        EE_updCfg();
-        break;
-
-      case 2: DEBUGLN("Preset");
-        {
-          cfg.presetAmount = constrain(data[2], 1, MAX_PRESETS);   // кол-во режимов
-          FOR_j(0, cfg.presetAmount) {
-            FOR_i(0, PRES_SIZE) {
-              *((byte*)&preset + j * PRES_SIZE + i) = data[j * PRES_SIZE + i + 3]; // загоняем в структуру
-            }
-          }
-          //if (!cfg.rotation) setPreset(data[cfg.presetAmount * PRES_SIZE + 3] - 1);
-          int dataStart = cfg.presetAmount * PRES_SIZE + 3;
-          setPreset(data[dataStart] - 1);
-          setTime(data[dataStart + 1], data[dataStart + 2], data[dataStart + 3], data[dataStart + 4]);
-          cfgValidate();   // проверка конфига после пакета режимов
-
-          EE_updatePreset();
-          //presetRotation(true); // форсировать смену режима
-          holdPresTmr.restart();
-          loading = true;
-        }
-        break;
-
-      case 3: DEBUGLN("Dawn"); blinkTmr.restart();
-        FOR_i(0, DAWN_SIZE) {
-          *((byte*)&dawn + i) = data[i + 2]; // загоняем в структуру
-        }
-        setTime(data[DAWN_SIZE + 2], data[DAWN_SIZE + 3], data[DAWN_SIZE + 4], data[DAWN_SIZE + 5]);
-        EE_updateDawn();
-        break;
-
       case 4: DEBUGLN("From master");
         if (cfg.role == GL_SLAVE) {
           switch (data[2]) {
@@ -159,15 +86,6 @@ void parsing() {
           }
           EE_updateCfg();
         }
-        break;
-
-      case 5: DEBUGLN("Palette"); blinkTmr.restart();
-        FOR_i(0, PAL_SIZE) {
-          *((byte*)&pal + i) = data[i + 2]; // загоняем в структуру
-        }
-        setTime(data[PAL_SIZE + 2], data[PAL_SIZE + 3], data[PAL_SIZE + 4], data[PAL_SIZE + 5]);
-        updPal();
-        EE_updatePal();
         break;
 
       case 6: DEBUGLN("Time from AP");
